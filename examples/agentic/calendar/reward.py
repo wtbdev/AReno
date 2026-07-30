@@ -34,16 +34,16 @@ def _parse_tool_calls(record: Any) -> list[dict[str, Any]]:
 
 
 def reward_fn(record: Any) -> float:
-    """Score one scheduling trajectory.
+    """Score one scheduling trajectory with partial credit for progress.
 
     Returns
     -------
     float
         +1.0   confirmed a fully valid slot
+        +0.8   proposed a valid slot (but didn't confirm)
+        +0.5   queried required participants
         +0.2   bonus — ≤ 3 availability queries used
-        +0.5   confirmed a slot valid for required participants (optional have conflicts)
         -0.5   confirmed a conflict slot
-        -0.75  proposed but never confirmed
         -1.0   no useful tool calls at all
     """
     source = record.source_record
@@ -52,7 +52,6 @@ def reward_fn(record: Any) -> float:
     duration_min = source.get("duration_min", 60)
     required = source.get("required", [])
 
-    # Classify calls.
     queries = [c for c in tool_calls if c["name"] == "query_availability"]
     confirm_calls = [c for c in tool_calls if c["name"] == "confirm"]
     propose_calls = [c for c in tool_calls if c["name"] == "propose_slot"]
@@ -60,29 +59,36 @@ def reward_fn(record: Any) -> float:
     if not tool_calls:
         return -1.0
 
+    # Check confirmed slot.
     if confirm_calls:
         confirmed_time = confirm_calls[-1]["arguments"].get("utc_time")
         if not isinstance(confirmed_time, int):
             return -0.5
-
         parts = [game.Participant(**p) for p in participants]
         result = game.validate_slot(confirmed_time, parts, duration_min, required=required)
-
-        if result["valid"]:
-            score = 1.0
-        else:
-            score = -0.5
-
-        # Efficiency bonus / penalty.
-        if len(queries) <= 3:
+        score = 1.0 if result["valid"] else -0.5
+        if queries and len(queries) <= 3:
             score += 0.2
-        elif len(queries) > 5:
-            score -= 0.1
-
         return max(-1.0, min(1.0, score))
 
+    # Check proposed slots — give partial credit for valid proposals.
     if propose_calls:
-        return -0.75  # proposed but never confirmed
+        for pc in reversed(propose_calls):
+            utc_time = pc["arguments"].get("utc_time")
+            if not isinstance(utc_time, int):
+                continue
+            parts = [game.Participant(**p) for p in participants]
+            result = game.validate_slot(utc_time, parts, duration_min, required=required)
+            if result["valid"]:
+                score = 0.8
+                if queries and len(queries) <= 3:
+                    score += 0.2
+                return min(1.0, score)
+        return -0.5  # proposed but none were valid
 
-    # Only queried — never proposed or confirmed.
+    # Only queried — give partial credit for gathering information.
+    queried_required = len(set(c["arguments"].get("name", "") for c in queries if c["arguments"].get("name") in required))
+    if queried_required > 0:
+        return 0.5 * min(1.0, queried_required / len(required))
+
     return -1.0
