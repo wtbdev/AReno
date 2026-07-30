@@ -176,10 +176,9 @@ async def run_agent(ctx, batch):
 
             tool_calls = getattr(choice.message, "tool_calls", None) or []
             if not tool_calls:
-                # No tool call — model produced text instead.  Append and
-                # continue; if the model never calls confirm, the reward
-                # function will penalise.
                 assistant_content = choice.message.content or ""
+                logger.warning("no tool call in response: finish_reason=%s content_preview=%s",
+                               getattr(choice, "finish_reason", "?"), assistant_content[:200])
                 messages.append({"role": "assistant", "content": assistant_content})
                 break
 
