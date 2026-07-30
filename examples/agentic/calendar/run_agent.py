@@ -156,7 +156,7 @@ async def run_agent(ctx, batch):
                 model="policy",
                 messages=messages,
                 tools=TOOLS,
-                tool_choice="auto",
+                tool_choice="required",
                 stream=False,
             )
             choice = response.choices[0] if response.choices else None
@@ -170,7 +170,7 @@ async def run_agent(ctx, batch):
                     messages=[dict(m) for m in messages],
                     response=response,
                     tools=TOOLS,
-                    tool_choice="auto",
+                    tool_choice="required",
                 )
             )
 
