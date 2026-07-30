@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """\
 Schedule a meeting across time zones. Steps: query_availability for required people, convert to UTC, propose_slot to verify, confirm to finalize. Use UTC HHMM (e.g. 1430). Do not confirm without propose_slot."""
 
-MAX_TURNS = 6
+MAX_TURNS = 10
 
 TOOLS = [
     {
@@ -156,7 +156,7 @@ async def run_agent(ctx, batch):
                 model="policy",
                 messages=messages,
                 tools=TOOLS,
-                tool_choice="required",
+                tool_choice="auto",
                 stream=False,
             )
             choice = response.choices[0] if response.choices else None
@@ -170,16 +170,15 @@ async def run_agent(ctx, batch):
                     messages=[dict(m) for m in messages],
                     response=response,
                     tools=TOOLS,
-                    tool_choice="required",
+                    tool_choice="auto",
                 )
             )
 
             tool_calls = getattr(choice.message, "tool_calls", None) or []
             if not tool_calls:
                 assistant_content = choice.message.content or ""
-                logger.info("assistant text (no tool call): %s", assistant_content[:120])
                 messages.append({"role": "assistant", "content": assistant_content})
-                continue
+                break
 
             # Process the first tool call.
             tc = tool_calls[0]
