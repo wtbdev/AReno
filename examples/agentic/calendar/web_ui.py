@@ -177,30 +177,19 @@ def _route_path(raw_path: str) -> str:
 # Game logic
 # ---------------------------------------------------------------------------
 
-_SAMPLE_TASKS = [
-    {
-        "participants": [
-            {"name": "Alice", "utc_offset_hours": +8, "available_blocks": [(900, 1700)]},
-            {"name": "Bob", "utc_offset_hours": -5, "available_blocks": [(900, 1700)]},
-            {"name": "Carol", "utc_offset_hours": 0, "available_blocks": [(800, 1200), (1300, 1800)]},
-        ],
-        "duration_min": 60,
-        "required": ["Alice", "Bob"],
-    },
-    {
-        "participants": [
-            {"name": "Dave", "utc_offset_hours": +1, "available_blocks": [(1000, 1600)]},
-            {"name": "Eve", "utc_offset_hours": -8, "available_blocks": [(700, 1200)]},
-        ],
-        "duration_min": 30,
-        "required": ["Dave", "Eve"],
-    },
-]
-
-
 def _new_task(server: CalendarServer) -> None:
     import random
-    task = random.choice(_SAMPLE_TASKS)
+    spec = _iu.spec_from_file_location("_calendar_gen", str(Path(__file__).resolve().parent / "dataset_generator.py"))
+    gen = _iu.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    records = gen.generate_records(1, seed=random.randint(0, 2**31 - 1))
+    record = records[0]
+    # Strip scenario info — the LLM shouldn't see it.
+    task = {
+        "participants": record["participants"],
+        "duration_min": record["duration_min"],
+        "required": record["required"],
+    }
     server.task = task
     parts = task["participants"]
     req = task["required"]
