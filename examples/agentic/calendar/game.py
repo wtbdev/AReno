@@ -177,15 +177,23 @@ def validate_slot(
 
 
 def format_task(task: dict[str, Any]) -> str:
-    """Build a compact scheduling prompt from a task dict."""
+    """Build a human-readable scheduling prompt from a task dict."""
     parts = task.get("participants", [])
     duration = task.get("duration_min", 60)
     required = task.get("required", [p["name"] for p in parts])
 
-    lines = [f"Schedule {duration}min. Required: {', '.join(required)}."]
+    lines = [
+        f"Schedule a {duration}-minute meeting.",
+        f"Required participants (must attend): {', '.join(required)}.",
+        "",
+        "Participants and their local availability:",
+    ]
     for p in parts:
         offset = p["utc_offset_hours"]
         sign = "+" if offset >= 0 else ""
         blocks = ", ".join(f"{s:04d}-{e:04d}" for s, e in p["available_blocks"])
-        lines.append(f"{p['name']} (UTC{sign}{offset}): {blocks}")
+        marker = " [REQUIRED]" if p["name"] in required else ""
+        lines.append(f"  {p['name']} (UTC{sign}{offset}): {blocks}{marker}")
+    lines.append("")
+    lines.append("Use query_availability to check times, propose_slot to verify, confirm to finalize.")
     return "\n".join(lines)

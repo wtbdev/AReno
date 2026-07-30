@@ -24,7 +24,19 @@ _game_spec.loader.exec_module(game)  # type: ignore[union-attr]
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-Schedule a meeting across time zones. Steps: query_availability for required people, convert to UTC, propose_slot to verify, confirm to finalize. Use UTC HHMM (e.g. 1430). Do not confirm without propose_slot."""
+You are a meeting scheduler. You must use the tools provided to schedule a meeting.
+
+Step 1: Call query_availability for each required participant.
+Step 2: Convert all times to UTC. UTC = local_time - UTC_offset.
+  Example: 0900 at UTC+8 = 0900 - 8h = 0100 UTC.
+Step 3: Find a UTC window where ALL required participants are free for the full meeting duration.
+Step 4: Call propose_slot with the UTC start time and participant list.
+Step 5: If propose_slot returns valid=true, call confirm. Otherwise, try another time.
+
+Important:
+- All times in propose_slot and confirm are UTC HHMM format (0100, 1430, 2300).
+- Do NOT explain your reasoning in text. Use the tools directly.
+- Do NOT confirm without checking propose_slot first."""
 
 MAX_TURNS = 10
 
@@ -33,13 +45,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "query_availability",
-            "description": "Get a participant's available time blocks in their local time zone.",
+            "description": "Ask what times a participant is free. Returns their available time blocks in their own local time zone.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "The participant's name.",
+                        "description": "The participant's name, e.g. 'Alice'.",
                     }
                 },
                 "required": ["name"],
@@ -51,18 +63,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "propose_slot",
-            "description": "Check whether a proposed UTC time works for the listed participants.",
+            "description": "Check if a UTC time slot works for the given participants. Returns valid=true if everyone is free.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "utc_time": {
                         "type": "integer",
-                        "description": "Proposed meeting start time in UTC HHMM format (e.g. 1430).",
+                        "description": "Proposed UTC start time in HHMM format. Examples: 100 means 01:00 UTC, 1430 means 14:30 UTC.",
                     },
                     "participants": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Participants to check.",
+                        "description": "List of participant names to include in this check.",
                     },
                 },
                 "required": ["utc_time", "participants"],
@@ -74,13 +86,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "confirm",
-            "description": "Finalize the meeting at the specified UTC time.",
+            "description": "Finalize the meeting. Call this only after propose_slot returns valid=true.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "utc_time": {
                         "type": "integer",
-                        "description": "Confirmed meeting start time in UTC HHMM format.",
+                        "description": "The confirmed meeting start time in UTC HHMM format.",
                     }
                 },
                 "required": ["utc_time"],
