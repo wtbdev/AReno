@@ -177,10 +177,9 @@ async def run_agent(ctx, batch):
             tool_calls = getattr(choice.message, "tool_calls", None) or []
             if not tool_calls:
                 assistant_content = choice.message.content or ""
-                logger.warning("no tool call in response: finish_reason=%s content_preview=%s",
-                               getattr(choice, "finish_reason", "?"), assistant_content[:200])
+                logger.info("assistant text (no tool call): %s", assistant_content[:120])
                 messages.append({"role": "assistant", "content": assistant_content})
-                break
+                continue
 
             # Process the first tool call.
             tc = tool_calls[0]
