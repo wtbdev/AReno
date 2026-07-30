@@ -177,6 +177,15 @@ async def run_agent(ctx, batch):
             if choice is None:
                 break
 
+            # Debug: log what the model returned.
+            tc_names = [tc.function.name for tc in (getattr(choice.message, "tool_calls", None) or [])]
+            logger.info(
+                "model turn: finish=%s tool_calls=%s content=%s",
+                getattr(choice, "finish_reason", "?"),
+                tc_names,
+                (choice.message.content or "")[:120],
+            )
+
             # Record this turn regardless of whether there is a tool call.
             turn_records.append(
                 AgentTrajectoryTurn(
