@@ -90,12 +90,37 @@ TOOLS = [
     },
 ]
 
+# Per-stage tools — only one tool exposed at a time so the model
+# never has to choose between tools (cf. TicTacToe's single-tool design).
+STAGE_QUERY = [TOOLS[0]]
+STAGE_PROPOSE = [TOOLS[1]]
+STAGE_CONFIRM = [TOOLS[2]]
+
 
 def _lookup_participant(task: dict, name: str) -> dict | None:
     for p in task.get("participants", []):
         if p["name"] == name:
             return p
     return None
+
+
+def _safe_json(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _assistant_msg(choice, tc) -> dict:
+    return {
+        "role": "assistant",
+        "content": choice.message.content or "",
+        "tool_calls": [{
+            "id": tc.id,
+            "type": "function",
+            "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+        }],
+    }
 
 
 def _to_int(value: object) -> int | None:
@@ -158,77 +183,111 @@ async def run_agent(ctx, batch):
 
     async def run_one(item):
         task = item.record
+        required = set(task.get("required", []))
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": item.prompt},
         ]
         turn_records = []
+        queried: set[str] = set()
+        proposed = False
+        confirmed = False
 
+        # ── Stage 1: Query ──────────────────────────────────────────
         for _ in range(MAX_TURNS):
             response = await client.chat.completions.create(
                 model="policy",
                 messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
+                tools=STAGE_QUERY,
+                tool_choice="required",
                 stream=False,
-                extra_body={"max_tokens": 128, "temperature": 1.0},
+                extra_body={"max_tokens": 64, "temperature": 1.0},
             )
             choice = response.choices[0] if response.choices else None
             if choice is None:
                 break
-
-            # Debug: log what the model returned.
-            tc_names = [tc.function.name for tc in (getattr(choice.message, "tool_calls", None) or [])]
-            logger.info(
-                "model turn: finish=%s tool_calls=%s content=%s",
-                getattr(choice, "finish_reason", "?"),
-                tc_names,
-                (choice.message.content or "")[:120],
-            )
-
-            # Record this turn regardless of whether there is a tool call.
             turn_records.append(
                 AgentTrajectoryTurn(
-                    item=item,
-                    messages=[dict(m) for m in messages],
-                    response=response,
-                    tools=TOOLS,
-                    tool_choice="auto",
+                    item=item, messages=[dict(m) for m in messages],
+                    response=response, tools=STAGE_QUERY, tool_choice="required",
                 )
             )
-
-            tool_calls = getattr(choice.message, "tool_calls", None) or []
-            if not tool_calls:
-                assistant_content = choice.message.content or ""
-                messages.append({"role": "assistant", "content": assistant_content})
+            tcs = getattr(choice.message, "tool_calls", None) or []
+            if not tcs:
                 continue
-
-            # Process the first tool call.
-            tc = tool_calls[0]
-            tool_name = tc.function.name
-            try:
-                tool_args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                tool_args = {}
-            result_text = _execute_tool(task, tool_name, tool_args)
-
-            # Append assistant + tool messages.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": choice.message.content or "",
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": tool_name, "arguments": tc.function.arguments},
-                        }
-                    ],
-                }
-            )
+            tc = tcs[0]
+            args = _safe_json(tc.function.arguments)
+            result_text = _execute_tool(task, tc.function.name, args)
+            messages.append(_assistant_msg(choice, tc))
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+            name = args.get("name", "")
+            if name:
+                queried.add(name)
+            if required.issubset(queried):
+                break
 
-            if tool_name == "confirm":
+        # ── Stage 2: Propose ────────────────────────────────────────
+        if required.issubset(queried):
+            for _ in range(MAX_TURNS):
+                response = await client.chat.completions.create(
+                    model="policy",
+                    messages=messages,
+                    tools=STAGE_PROPOSE,
+                    tool_choice="required",
+                    stream=False,
+                    extra_body={"max_tokens": 64, "temperature": 1.0},
+                )
+                choice = response.choices[0] if response.choices else None
+                if choice is None:
+                    break
+                turn_records.append(
+                    AgentTrajectoryTurn(
+                        item=item, messages=[dict(m) for m in messages],
+                        response=response, tools=STAGE_PROPOSE, tool_choice="required",
+                    )
+                )
+                tcs = getattr(choice.message, "tool_calls", None) or []
+                if not tcs:
+                    continue
+                tc = tcs[0]
+                args = _safe_json(tc.function.arguments)
+                result_text = _execute_tool(task, tc.function.name, args)
+                messages.append(_assistant_msg(choice, tc))
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                proposed = True
+                result = json.loads(result_text)
+                if result.get("valid"):
+                    break
+
+        # ── Stage 3: Confirm ────────────────────────────────────────
+        if proposed:
+            for _ in range(MAX_TURNS):
+                response = await client.chat.completions.create(
+                    model="policy",
+                    messages=messages,
+                    tools=STAGE_CONFIRM,
+                    tool_choice="required",
+                    stream=False,
+                    extra_body={"max_tokens": 32, "temperature": 1.0},
+                )
+                choice = response.choices[0] if response.choices else None
+                if choice is None:
+                    break
+                turn_records.append(
+                    AgentTrajectoryTurn(
+                        item=item, messages=[dict(m) for m in messages],
+                        response=response, tools=STAGE_CONFIRM, tool_choice="required",
+                    )
+                )
+                tcs = getattr(choice.message, "tool_calls", None) or []
+                if not tcs:
+                    continue
+                tc = tcs[0]
+                args = _safe_json(tc.function.arguments)
+                result_text = _execute_tool(task, tc.function.name, args)
+                messages.append(_assistant_msg(choice, tc))
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
+                confirmed = True
                 break
 
         return turn_records
