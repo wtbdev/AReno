@@ -109,10 +109,10 @@ class CalendarGameTest(unittest.TestCase):
             "required": ["Alice"],
         }
         prompt = g.format_task(task)
-        self.assertIn("Schedule a 60-minute meeting", prompt)
+        self.assertIn("Schedule 60min", prompt)
         self.assertIn("Alice", prompt)
         self.assertIn("Bob", prompt)
-        self.assertIn("confirm(utc_time)", prompt)
+        self.assertIn("Required: Alice", prompt)
 
 
 class CalendarGeneratorTest(unittest.TestCase):
@@ -260,7 +260,7 @@ class CalendarDatasetLoaderTest(unittest.TestCase):
             result = loader.load_training_dataset(tmp_path)
             self.assertEqual(len(result), 2)
             self.assertIn("prompt", result[0])
-            self.assertIn("Schedule a 60-minute meeting", result[0]["prompt"])
+            self.assertIn("Schedule 60min", result[0]["prompt"])
             self.assertIn("required", result[0])
             self.assertEqual(result[0]["required"], ["Alice", "Bob"])
         finally:

@@ -24,18 +24,7 @@ _game_spec.loader.exec_module(game)  # type: ignore[union-attr]
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a calendar scheduling assistant. Your job is to find a meeting time
-that works for all required participants across different time zones.
-
-Work step-by-step:
-1. Use query_availability to check each required participant.
-2. Convert their local times to UTC.
-3. Find a UTC window where everyone is free for the required duration.
-4. Use propose_slot to verify.
-5. Use confirm to finalize.
-
-All times in propose_slot and confirm must be in UTC HHMM format (e.g. 1430).
-Do NOT confirm a time without verifying it first with propose_slot."""
+Schedule a meeting across time zones. Steps: query_availability for required people, convert to UTC, propose_slot to verify, confirm to finalize. Use UTC HHMM (e.g. 1430). Do not confirm without propose_slot."""
 
 MAX_TURNS = 10
 

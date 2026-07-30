@@ -177,32 +177,15 @@ def validate_slot(
 
 
 def format_task(task: dict[str, Any]) -> str:
-    """Build a human-readable scheduling prompt from a task dict."""
+    """Build a compact scheduling prompt from a task dict."""
     parts = task.get("participants", [])
     duration = task.get("duration_min", 60)
     required = task.get("required", [p["name"] for p in parts])
 
-    lines = [
-        f"Schedule a {duration}-minute meeting.",
-        f"Required participants: {', '.join(required)}.",
-        "",
-        "Participants:",
-    ]
+    lines = [f"Schedule {duration}min. Required: {', '.join(required)}."]
     for p in parts:
         offset = p["utc_offset_hours"]
         sign = "+" if offset >= 0 else ""
-        blocks = ", ".join(f"{s:04d}–{e:04d}" for s, e in p["available_blocks"])
-        lines.append(f"  - {p['name']} (UTC{sign}{offset}): {blocks}")
-    lines.extend(
-        [
-            "",
-            "You have three tools:",
-            "  query_availability(name)    — get a participant's free time blocks (local time)",
-            "  propose_slot(utc_time, [names]) — check if a UTC time works for the listed people",
-            "  confirm(utc_time)           — finalize the meeting",
-            "",
-            "All times in propose_slot and confirm must be in UTC HHMM format.",
-            "Use query_availability first, then propose_slot, then confirm.",
-        ]
-    )
+        blocks = ", ".join(f"{s:04d}-{e:04d}" for s, e in p["available_blocks"])
+        lines.append(f"{p['name']} (UTC{sign}{offset}): {blocks}")
     return "\n".join(lines)
