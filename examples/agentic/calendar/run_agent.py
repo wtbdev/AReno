@@ -214,6 +214,7 @@ async def run_agent(ctx, batch):
             )
             tcs = getattr(choice.message, "tool_calls", None) or []
             if not tcs:
+                messages.append({"role": "assistant", "content": choice.message.content or ""})
                 continue
             tc = tcs[0]
             args = _safe_json(tc.function.arguments)
