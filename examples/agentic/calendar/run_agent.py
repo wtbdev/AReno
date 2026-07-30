@@ -24,19 +24,7 @@ _game_spec.loader.exec_module(game)  # type: ignore[union-attr]
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a meeting scheduler. You must use the tools provided to schedule a meeting.
-
-Step 1: Call query_availability for each required participant.
-Step 2: Convert all times to UTC. UTC = local_time - UTC_offset.
-  Example: 0900 at UTC+8 = 0900 - 8h = 0100 UTC.
-Step 3: Find a UTC window where ALL required participants are free for the full meeting duration.
-Step 4: Call propose_slot with the UTC start time and participant list.
-Step 5: If propose_slot returns valid=true, call confirm. Otherwise, try another time.
-
-Important:
-- All times in propose_slot and confirm are UTC HHMM format (0100, 1430, 2300).
-- Do NOT explain your reasoning in text. Use the tools directly.
-- Do NOT confirm without checking propose_slot first."""
+Schedule a meeting. Use query_availability to check each required participant's free times. Convert all times to UTC (UTC = local - offset). Use propose_slot to verify a time. Use confirm to finalize. All propose/confirm times in UTC HHMM (e.g. 1430)."""
 
 MAX_TURNS = 10
 
@@ -183,6 +171,7 @@ async def run_agent(ctx, batch):
                 tools=TOOLS,
                 tool_choice="auto",
                 stream=False,
+                extra_body={"max_tokens": 128, "temperature": 1.0},
             )
             choice = response.choices[0] if response.choices else None
             if choice is None:
@@ -203,7 +192,7 @@ async def run_agent(ctx, batch):
             if not tool_calls:
                 assistant_content = choice.message.content or ""
                 messages.append({"role": "assistant", "content": assistant_content})
-                break
+                continue
 
             # Process the first tool call.
             tc = tool_calls[0]

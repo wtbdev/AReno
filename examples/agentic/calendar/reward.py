@@ -20,9 +20,18 @@ _game_spec.loader.exec_module(game)  # type: ignore[union-attr]
 def _as_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+    if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     return None
+
+
+def _unique_query_count(queries: list[dict]) -> int:
+    names = set()
+    for q in queries:
+        name = (q.get("arguments") or {}).get("name", "")
+        if name:
+            names.add(name)
+    return len(names)
 
 
 def _parse_tool_calls(record: Any) -> list[dict[str, Any]]:
@@ -50,7 +59,7 @@ def reward_fn(record: Any) -> float:
         +1.0   confirmed a fully valid slot
         +0.8   proposed a valid slot (but didn't confirm)
         +0.5   queried required participants
-        +0.2   bonus — ≤ 3 availability queries used
+        +0.2   bonus — ≤ 3 unique participants queried
         -0.5   confirmed a conflict slot
         -1.0   no useful tool calls at all
     """
@@ -67,15 +76,16 @@ def reward_fn(record: Any) -> float:
     if not tool_calls:
         return -1.0
 
-    # Check confirmed slot.
+    # Check confirmed slot — only the first confirm counts.
     if confirm_calls:
-        confirmed_time = _as_int(confirm_calls[-1]["arguments"].get("utc_time"))
+        confirmed_time = _as_int(confirm_calls[0]["arguments"].get("utc_time"))
         if confirmed_time is None:
             return -0.5
         parts = [game.Participant(**p) for p in participants]
         result = game.validate_slot(confirmed_time, parts, duration_min, required=required)
         score = 1.0 if result["valid"] else -0.5
-        if queries and len(queries) <= 3:
+        uq = _unique_query_count(queries)
+        if uq > 0 and uq <= 3:
             score += 0.2
         return max(-1.0, min(1.0, score))
 
@@ -89,13 +99,20 @@ def reward_fn(record: Any) -> float:
             result = game.validate_slot(utc_time, parts, duration_min, required=required)
             if result["valid"]:
                 score = 0.8
-                if queries and len(queries) <= 3:
+                uq = _unique_query_count(queries)
+                if uq > 0 and uq <= 3:
                     score += 0.2
                 return min(1.0, score)
         return -0.5  # proposed but none were valid
 
     # Only queried — give partial credit for gathering information.
-    queried_required = len(set(c["arguments"].get("name", "") for c in queries if c["arguments"].get("name") in required))
+    queried_required = len(
+        set(
+            c["arguments"].get("name", "")
+            for c in queries
+            if c["arguments"].get("name") in required
+        )
+    )
     if queried_required > 0:
         return 0.5 * min(1.0, queried_required / len(required))
 

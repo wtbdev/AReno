@@ -110,9 +110,8 @@ class CalendarGameTest(unittest.TestCase):
         }
         prompt = g.format_task(task)
         self.assertIn("Schedule a 60-minute meeting", prompt)
-        self.assertIn("Alice", prompt)
-        self.assertIn("Bob", prompt)
-        self.assertIn("REQUIRED", prompt)
+        self.assertIn("Required: Alice", prompt)
+        self.assertIn("UTC+8", prompt)
 
 
 class CalendarGeneratorTest(unittest.TestCase):
@@ -191,7 +190,7 @@ class CalendarRewardTest(unittest.TestCase):
         score = self.reward.reward_fn(record)
         self.assertLess(score, 0)  # conflict → negative
 
-    def test_reward_penalizes_no_confirm(self):
+    def test_queried_required_gets_partial_credit(self):
         source = {
             "participants": [
                 {"name": "Alice", "utc_offset_hours": +8, "available_blocks": [(900, 1700)]},
@@ -199,16 +198,15 @@ class CalendarRewardTest(unittest.TestCase):
             "duration_min": 60,
             "required": ["Alice"],
         }
-        # Only queried, never proposed or confirmed.
+        # Queried the required participant but didn't propose/confirm.
         record = self._record(
             source,
             [
                 {"name": "query_availability", "arguments": {"name": "Alice"}},
-                {"name": "query_availability", "arguments": {"name": "Alice"}},
             ],
         )
         score = self.reward.reward_fn(record)
-        self.assertLess(score, 0)
+        self.assertEqual(score, 0.5)  # partial credit for querying required
 
     def test_no_tool_calls(self):
         record = SimpleNamespace(source_record={}, tool_calls=[])
@@ -223,12 +221,33 @@ class CalendarRewardTest(unittest.TestCase):
             "duration_min": 60,
             "required": ["Alice"],
         }
+        # Propose a valid slot (1000 UTC = Alice 1800 local — wait, that's outside 9-17)
+        # Propose 100 UTC = Alice 0900 local, valid
         record = self._record(
             source,
-            [{"name": "propose_slot", "arguments": {"utc_time": 1000, "participants": ["Alice"]}}],
+            [{"name": "propose_slot", "arguments": {"utc_time": 100, "participants": ["Alice"]}}],
         )
         score = self.reward.reward_fn(record)
-        self.assertEqual(score, -0.75)
+        self.assertEqual(score, 0.8)  # valid proposal, no confirm → +0.8
+
+    def test_only_query_gets_partial_credit(self):
+        source = {
+            "participants": [
+                {"name": "Alice", "utc_offset_hours": +8, "available_blocks": [(900, 1700)]},
+                {"name": "Bob", "utc_offset_hours": 0, "available_blocks": [(800, 1600)]},
+            ],
+            "duration_min": 60,
+            "required": ["Alice", "Bob"],
+        }
+        record = self._record(
+            source,
+            [
+                {"name": "query_availability", "arguments": {"name": "Alice"}},
+                {"name": "query_availability", "arguments": {"name": "Bob"}},
+            ],
+        )
+        score = self.reward.reward_fn(record)
+        self.assertGreater(score, 0)  # queried both required → partial credit
 
 
 class CalendarDatasetLoaderTest(unittest.TestCase):
@@ -261,8 +280,7 @@ class CalendarDatasetLoaderTest(unittest.TestCase):
             self.assertEqual(len(result), 2)
             self.assertIn("prompt", result[0])
             self.assertIn("Schedule a 60-minute meeting", result[0]["prompt"])
-            self.assertIn("required", result[0])
-            self.assertEqual(result[0]["required"], ["Alice", "Bob"])
+            self.assertIn("Required: Alice, Bob", result[0]["prompt"])
         finally:
             import os
             os.unlink(tmp_path)
