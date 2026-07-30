@@ -110,6 +110,15 @@ def _lookup_participant(task: dict, name: str) -> dict | None:
     return None
 
 
+def _to_int(value: object) -> int | None:
+    """Convert tool argument to int, handling string inputs from the model."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def _execute_tool(task: dict, tool_name: str, args: dict) -> str:
     """Execute a tool locally and return a JSON string result."""
     if tool_name == "query_availability":
@@ -123,14 +132,18 @@ def _execute_tool(task: dict, tool_name: str, args: dict) -> str:
         return json.dumps({"name": name, "tz": f"UTC{sign}{offset}", "free": blocks})
 
     if tool_name == "propose_slot":
-        utc_time = args.get("utc_time")
+        utc_time = _to_int(args.get("utc_time"))
         names = args.get("participants", [])
         parts = [game.Participant(**p) for p in task["participants"] if p["name"] in names]
+        if utc_time is None:
+            return json.dumps({"valid": False, "reason": f"invalid utc_time: {args.get('utc_time')}"})
         result = game.validate_slot(utc_time, parts, task["duration_min"], required=task.get("required"))
         return json.dumps(result)
 
     if tool_name == "confirm":
-        utc_time = args.get("utc_time")
+        utc_time = _to_int(args.get("utc_time"))
+        if utc_time is None:
+            return json.dumps({"success": False, "message": f"invalid utc_time: {args.get('utc_time')}"})
         return json.dumps({"success": True, "utc_time": utc_time, "message": "Meeting confirmed."})
 
     return json.dumps({"error": f"unknown tool: {tool_name}"})

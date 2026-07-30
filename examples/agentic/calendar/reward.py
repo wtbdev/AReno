@@ -17,6 +17,14 @@ game = _iu.module_from_spec(_game_spec)  # type: ignore[assignment]
 _game_spec.loader.exec_module(game)  # type: ignore[union-attr]
 
 
+def _as_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
 def _parse_tool_calls(record: Any) -> list[dict[str, Any]]:
     """Normalise tool calls from a reward record into a uniform list."""
     raw = getattr(record, "tool_calls", None) or []
@@ -61,8 +69,8 @@ def reward_fn(record: Any) -> float:
 
     # Check confirmed slot.
     if confirm_calls:
-        confirmed_time = confirm_calls[-1]["arguments"].get("utc_time")
-        if not isinstance(confirmed_time, int):
+        confirmed_time = _as_int(confirm_calls[-1]["arguments"].get("utc_time"))
+        if confirmed_time is None:
             return -0.5
         parts = [game.Participant(**p) for p in participants]
         result = game.validate_slot(confirmed_time, parts, duration_min, required=required)
@@ -74,8 +82,8 @@ def reward_fn(record: Any) -> float:
     # Check proposed slots — give partial credit for valid proposals.
     if propose_calls:
         for pc in reversed(propose_calls):
-            utc_time = pc["arguments"].get("utc_time")
-            if not isinstance(utc_time, int):
+            utc_time = _as_int(pc["arguments"].get("utc_time"))
+            if utc_time is None:
                 continue
             parts = [game.Participant(**p) for p in participants]
             result = game.validate_slot(utc_time, parts, duration_min, required=required)
