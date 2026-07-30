@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """\
 Schedule a meeting across time zones. Steps: query_availability for required people, convert to UTC, propose_slot to verify, confirm to finalize. Use UTC HHMM (e.g. 1430). Do not confirm without propose_slot."""
 
-MAX_TURNS = 10
+MAX_TURNS = 6
 
 TOOLS = [
     {
@@ -104,11 +104,11 @@ def _execute_tool(task: dict, tool_name: str, args: dict) -> str:
         name = args.get("name", "")
         p = _lookup_participant(task, name)
         if p is None:
-            return json.dumps({"error": f"participant '{name}' not found"})
+            return json.dumps({"error": f"'{name}' not found"})
         offset = p["utc_offset_hours"]
         sign = "+" if offset >= 0 else ""
-        blocks = [f"{s:04d}–{e:04d} UTC{sign}{offset}" for s, e in p["available_blocks"]]
-        return json.dumps({"name": name, "utc_offset": f"UTC{sign}{offset}", "available_blocks": blocks})
+        blocks = [f"{s:04d}-{e:04d}" for s, e in p["available_blocks"]]
+        return json.dumps({"name": name, "tz": f"UTC{sign}{offset}", "free": blocks})
 
     if tool_name == "propose_slot":
         utc_time = args.get("utc_time")
